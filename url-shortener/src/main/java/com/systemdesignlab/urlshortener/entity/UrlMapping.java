@@ -29,8 +29,10 @@ public class UrlMapping {
     @Column(nullable = false, unique = true, length = 8)
     private String shortCode;
     
-    private long clickCount;
+    @Column(nullable = false)
+    private long clickCount = 0;
 
+    @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist
