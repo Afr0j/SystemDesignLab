@@ -3,6 +3,7 @@ package com.systemdesignlab.urlshortener.service;
 import org.springframework.stereotype.Service;
 
 import com.systemdesignlab.urlshortener.entity.UrlMapping;
+import com.systemdesignlab.urlshortener.exception.UrlNotFoundException;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
 import com.systemdesignlab.urlshortener.util.Base62Encoder;
 
@@ -36,6 +37,17 @@ public class UrlService {
 
         return shortCode;
 
+    }
+    
+    public String redirect(String shortCode) {
+    	UrlMapping url = repository.findByShortCode(shortCode)
+    	        .orElseThrow(() -> new UrlNotFoundException(shortCode));
+
+    	url.setClickCount(url.getClickCount() + 1);
+
+    	repository.save(url);
+
+    	return url.getLongUrl();
     }
 
 }
