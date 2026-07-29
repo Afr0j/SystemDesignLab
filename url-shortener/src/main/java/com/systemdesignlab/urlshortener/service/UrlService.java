@@ -39,6 +39,7 @@ public class UrlService {
 
     }
     
+    @Transactional
     public String redirect(String shortCode) {
     	UrlMapping url = repository.findByShortCode(shortCode)
     	        .orElseThrow(() -> new UrlNotFoundException(shortCode));
