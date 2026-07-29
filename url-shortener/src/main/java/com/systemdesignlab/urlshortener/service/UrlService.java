@@ -6,6 +6,8 @@ import com.systemdesignlab.urlshortener.entity.UrlMapping;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
 import com.systemdesignlab.urlshortener.util.Base62Encoder;
 
+import jakarta.transaction.Transactional;
+
 @Service
 public class UrlService {
 	private final UrlRepository repository;
@@ -13,7 +15,8 @@ public class UrlService {
     public UrlService(UrlRepository repository) {
         this.repository = repository;
     }
-
+    
+    @Transactional
     public String shorten(String longUrl) {
 
         // TODO: Generate Short Code
