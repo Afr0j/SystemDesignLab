@@ -10,6 +10,9 @@ public final class Base62Encoder {
     }
 
     public static String encode(long id) {
+    	if (id < 0) {
+    	    throw new IllegalArgumentException("ID cannot be negative");
+    	}
 
         if (id == 0) {
             return "0";
@@ -22,6 +25,6 @@ public final class Base62Encoder {
             id /= BASE62.length;
         }
 
-        return encoded.reverse().toString();
+      return encoded.reverse().toString();
     }
 }
