@@ -3,9 +3,13 @@ package com.systemdesignlab.urlshortener.repository;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import com.systemdesignlab.urlshortener.entity.UrlMapping;
+
+import io.lettuce.core.dynamic.annotation.Param;
+import jakarta.transaction.Transactional;
 
 public interface UrlRepository extends JpaRepository<UrlMapping, Long> {
 	
@@ -18,5 +22,16 @@ public interface UrlRepository extends JpaRepository<UrlMapping, Long> {
 	Double getAverageClicks();
 	
 	Optional<UrlMapping> findTopByOrderByClickCountDesc();
+	
+	@Transactional
+	@Modifying
+	@Query("""
+	UPDATE UrlMapping u
+	SET u.clickCount = u.clickCount + 1
+	WHERE u.shortCode = :shortCode
+	""")
+	void incrementClickCount(
+	        @Param("shortCode")
+	        String shortCode);
 	
 }

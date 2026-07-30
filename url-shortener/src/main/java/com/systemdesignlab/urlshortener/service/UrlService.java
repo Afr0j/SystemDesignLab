@@ -16,11 +16,14 @@ import org.slf4j.LoggerFactory;
 public class UrlService {
 	private final UrlRepository repository;
 	private final SnowflakeGenerator snowflakeGenerator;
+	private final CacheService cacheService;
+	
 	private static final Logger log =LoggerFactory.getLogger(UrlService.class);
 
-    public UrlService(UrlRepository repository, SnowflakeGenerator snowflakeGenerator) {
+    public UrlService(UrlRepository repository, SnowflakeGenerator snowflakeGenerator,CacheService cacheService) {
         this.repository = repository;
         this.snowflakeGenerator=snowflakeGenerator;
+        this.cacheService=cacheService;
     }
     
     @Transactional
@@ -52,20 +55,32 @@ public class UrlService {
     
     @Transactional
     public String redirect(String shortCode) {
-    	log.info("Redirect requested for {}", shortCode);
 
-    	UrlMapping url = repository.findByShortCode(shortCode)
-    	        .orElseThrow(() -> new UrlNotFoundException(shortCode));
+        log.info("Redirect requested for {}", shortCode);
 
-    	log.debug("Current click count={}", url.getClickCount());
+        String cachedUrl = cacheService.getLongUrl(shortCode);
 
-    	url.setClickCount(url.getClickCount() + 1);
+        if (cachedUrl != null) {
 
-    	repository.save(url);
+            log.info("Cache HIT for {}", shortCode);
 
-    	log.info("Redirecting {} to {}", shortCode, url.getLongUrl());
+            repository.incrementClickCount(shortCode);
 
-    	return url.getLongUrl();
+            return cachedUrl;
+        }
+
+        log.info("Cache MISS for {}", shortCode);
+
+        UrlMapping url = repository.findByShortCode(shortCode)
+                .orElseThrow(() -> new UrlNotFoundException(shortCode));
+
+        repository.incrementClickCount(shortCode);
+
+        cacheService.cacheLongUrl(shortCode,
+                                  url.getLongUrl());
+
+        log.info("Cached {} -> {}", shortCode, url.getLongUrl());
+
+        return url.getLongUrl();
     }
-
 }
