@@ -22,6 +22,7 @@ public class UrlService {
     
     @Transactional
     public String shorten(String longUrl) {
+
     	
     	log.info("Creating short URL for {}", longUrl);
 
