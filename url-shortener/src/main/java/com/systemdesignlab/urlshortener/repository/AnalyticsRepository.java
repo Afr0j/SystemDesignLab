@@ -8,6 +8,6 @@ import com.systemdesignlab.urlshortener.entity.AnalyticsEvent;
 public interface AnalyticsRepository
         extends JpaRepository<AnalyticsEvent, Long> {
 	AnalyticsEvent findTopByShortCodeOrderByClickedAtDesc(
-	        String shortCode);
+	        String shortCode );
 
 }
