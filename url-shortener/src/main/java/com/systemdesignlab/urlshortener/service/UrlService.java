@@ -2,6 +2,7 @@ package com.systemdesignlab.urlshortener.service;
 
 import org.springframework.stereotype.Service;
 
+import com.systemdesignlab.urlshortener.dto.RedirectEvent;
 import com.systemdesignlab.urlshortener.entity.UrlMapping;
 import com.systemdesignlab.urlshortener.exception.UrlNotFoundException;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
@@ -9,6 +10,9 @@ import com.systemdesignlab.urlshortener.util.Base62Encoder;
 import com.systemdesignlab.urlshortener.util.SnowflakeGenerator;
 
 import jakarta.transaction.Transactional;
+
+import java.time.LocalDateTime;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,14 +21,21 @@ public class UrlService {
 	private final UrlRepository repository;
 	private final SnowflakeGenerator snowflakeGenerator;
 	private final CacheService cacheService;
+	private final KafkaProducerService kafkaProducerService;
 	
 	private static final Logger log =LoggerFactory.getLogger(UrlService.class);
 
-    public UrlService(UrlRepository repository, SnowflakeGenerator snowflakeGenerator,CacheService cacheService) {
-        this.repository = repository;
-        this.snowflakeGenerator=snowflakeGenerator;
-        this.cacheService=cacheService;
-    }
+	public UrlService(
+	        UrlRepository repository,
+	        SnowflakeGenerator snowflakeGenerator,
+	        CacheService cacheService,
+	        KafkaProducerService kafkaProducerService) {
+
+	    this.repository = repository;
+	    this.snowflakeGenerator = snowflakeGenerator;
+	    this.cacheService = cacheService;
+	    this.kafkaProducerService = kafkaProducerService;
+	}
     
     @Transactional
     public String shorten(String longUrl) {
@@ -64,7 +75,10 @@ public class UrlService {
 
             log.info("Cache HIT for {}", shortCode);
 
-            repository.incrementClickCount(shortCode);
+            kafkaProducerService.publish(
+                    new RedirectEvent(
+                            shortCode,
+                            LocalDateTime.now()));
 
             return cachedUrl;
         }
@@ -74,7 +88,10 @@ public class UrlService {
         UrlMapping url = repository.findByShortCode(shortCode)
                 .orElseThrow(() -> new UrlNotFoundException(shortCode));
 
-        repository.incrementClickCount(shortCode);
+        kafkaProducerService.publish(
+                new RedirectEvent(
+                        shortCode,
+                        LocalDateTime.now()));
 
         cacheService.cacheLongUrl(shortCode,
                                   url.getLongUrl());

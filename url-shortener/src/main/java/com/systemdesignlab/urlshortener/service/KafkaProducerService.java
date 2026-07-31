@@ -27,10 +27,13 @@ public class KafkaProducerService {
 
         kafkaTemplate.send(
                 TOPIC,
-                event.getShortCode(),   // Kafka Key
+                event.getShortCode(),
                 event);
 
-        log.info("Published redirect event for {}",
-                event.getShortCode());
+        log.info(
+            "Published redirect event for {}",
+            event.getShortCode());
+
     }
+
 }
