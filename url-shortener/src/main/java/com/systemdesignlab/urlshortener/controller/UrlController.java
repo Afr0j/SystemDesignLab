@@ -3,6 +3,8 @@ package com.systemdesignlab.urlshortener.controller;
 import com.systemdesignlab.urlshortener.dto.ShortenUrlRequest;
 import com.systemdesignlab.urlshortener.dto.ShortenUrlResponse;
 import com.systemdesignlab.urlshortener.service.UrlService;
+
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.net.URI;
@@ -34,13 +36,23 @@ public class UrlController {
     
     @GetMapping("/{shortCode}")
     public ResponseEntity<Void> redirect(
-            @PathVariable String shortCode) {
+            @PathVariable String shortCode, HttpServletRequest request) {
+    	String ip =
+                request.getRemoteAddr();
 
-        String longUrl = urlService.redirect(shortCode);
+        String userAgent =
+                request.getHeader("User-Agent");
+
+        String longUrl = urlService.redirect(
+                shortCode,
+                ip,
+                userAgent);
 
         return ResponseEntity
                 .status(HttpStatus.FOUND)
                 .location(URI.create(longUrl))
                 .build();
     }
+    
+ 
 }

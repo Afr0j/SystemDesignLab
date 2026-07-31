@@ -11,7 +11,11 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class RedirectEvent {
 
-    private String shortCode;
+	private String shortCode;
 
-    private LocalDateTime timestamp;
+	private LocalDateTime timestamp;
+
+	private String ipAddress;
+
+	private String userAgent;
 }

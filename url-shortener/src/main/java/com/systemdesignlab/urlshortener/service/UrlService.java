@@ -65,7 +65,7 @@ public class UrlService {
     }
     
     @Transactional
-    public String redirect(String shortCode) {
+    public String redirect(String shortCode, String ipAddress, String userAgent) {
 
         log.info("Redirect requested for {}", shortCode);
 
@@ -76,9 +76,12 @@ public class UrlService {
             log.info("Cache HIT for {}", shortCode);
 
             kafkaProducerService.publish(
-                    new RedirectEvent(
-                            shortCode,
-                            LocalDateTime.now()));
+            		new RedirectEvent(
+            		        shortCode,
+            		        LocalDateTime.now(),
+            		        ipAddress,
+            		        userAgent
+            		));
 
             return cachedUrl;
         }
@@ -89,9 +92,12 @@ public class UrlService {
                 .orElseThrow(() -> new UrlNotFoundException(shortCode));
 
         kafkaProducerService.publish(
-                new RedirectEvent(
-                        shortCode,
-                        LocalDateTime.now()));
+        		new RedirectEvent(
+        		        shortCode,
+        		        LocalDateTime.now(),
+        		        ipAddress,
+        		        userAgent
+        		));
 
         cacheService.cacheLongUrl(shortCode,
                                   url.getLongUrl());
