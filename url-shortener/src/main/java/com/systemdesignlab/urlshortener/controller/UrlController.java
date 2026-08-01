@@ -2,6 +2,7 @@ package com.systemdesignlab.urlshortener.controller;
 
 import com.systemdesignlab.urlshortener.dto.ShortenUrlRequest;
 import com.systemdesignlab.urlshortener.dto.ShortenUrlResponse;
+import com.systemdesignlab.urlshortener.service.RateLimiterService;
 import com.systemdesignlab.urlshortener.service.UrlService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,9 +19,11 @@ import org.springframework.web.bind.annotation.*;
 public class UrlController {
 
     private final UrlService urlService;
+    private final RateLimiterService rateLimiterService;
 
-    public UrlController(UrlService urlService) {
+    public UrlController(UrlService urlService, RateLimiterService rateLimiterService) {
         this.urlService = urlService;
+        this.rateLimiterService=rateLimiterService;
     }
 
     @PostMapping("/shorten")
@@ -42,6 +45,14 @@ public class UrlController {
 
         String userAgent =
                 request.getHeader("User-Agent");
+        
+        if (!rateLimiterService.allowRequest(ip)) {
+
+            return ResponseEntity
+                    .status(HttpStatus.TOO_MANY_REQUESTS)
+                    .build();
+
+        }
 
         String longUrl = urlService.redirect(
                 shortCode,
