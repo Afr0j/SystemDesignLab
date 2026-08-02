@@ -7,6 +7,7 @@ import com.systemdesignlab.urlshortener.entity.UrlMapping;
 import com.systemdesignlab.urlshortener.exception.UrlNotFoundException;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
 import com.systemdesignlab.urlshortener.util.Base62Encoder;
+import com.systemdesignlab.urlshortener.util.BloomFilter;
 import com.systemdesignlab.urlshortener.util.SnowflakeGenerator;
 
 import jakarta.transaction.Transactional;
@@ -23,6 +24,7 @@ public class UrlService {
 	private final SnowflakeGenerator snowflakeGenerator;
 	private final CacheService cacheService;
 	private final KafkaProducerService kafkaProducerService;
+	private final BloomFilter bloomFilter;
 	
 	private static final Logger log =LoggerFactory.getLogger(UrlService.class);
 
@@ -30,12 +32,14 @@ public class UrlService {
 	        UrlRepository repository,
 	        SnowflakeGenerator snowflakeGenerator,
 	        CacheService cacheService,
-	        KafkaProducerService kafkaProducerService) {
+	        KafkaProducerService kafkaProducerService,
+	        BloomFilter bloomFilter) {
 
 	    this.repository = repository;
 	    this.snowflakeGenerator = snowflakeGenerator;
 	    this.cacheService = cacheService;
 	    this.kafkaProducerService = kafkaProducerService;
+	    this.bloomFilter=bloomFilter;
 	}
     
     @Transactional
@@ -59,6 +63,7 @@ public class UrlService {
     	entity.setShortCode(shortCode);
 
     	repository.save(entity);
+    	bloomFilter.add(shortCode);
 
     	log.info("Created short code {} for {}", shortCode, longUrl);
 
@@ -67,6 +72,14 @@ public class UrlService {
     
     @Transactional
     public String redirect(String shortCode, String ipAddress, String userAgent) {
+    	if (!bloomFilter.mightContain(shortCode)) {
+
+            log.info(
+                "Bloom Filter rejected {}",
+                shortCode);
+
+            throw new UrlNotFoundException(shortCode);
+        }
 
         log.info("Redirect requested for {}", shortCode);
 
