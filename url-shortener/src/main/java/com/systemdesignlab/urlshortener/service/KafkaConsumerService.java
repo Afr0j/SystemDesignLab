@@ -2,13 +2,16 @@ package com.systemdesignlab.urlshortener.service;
 
 import com.systemdesignlab.urlshortener.dto.RedirectEvent;
 import com.systemdesignlab.urlshortener.entity.AnalyticsEvent;
+import com.systemdesignlab.urlshortener.entity.ProcessedEvent;
 import com.systemdesignlab.urlshortener.repository.AnalyticsRepository;
+import com.systemdesignlab.urlshortener.repository.ProcessedEventRepository;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
 
 import jakarta.transaction.Transactional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
@@ -20,13 +23,16 @@ public class KafkaConsumerService {
 
     private final UrlRepository repository;
     private final AnalyticsRepository analyticsRepository; 
+    private final ProcessedEventRepository processedEventRepository;
 
     public KafkaConsumerService(
             UrlRepository repository,
-            AnalyticsRepository analyticsRepository) {
+            AnalyticsRepository analyticsRepository,
+            ProcessedEventRepository processedEventRepository) {
 
         this.repository = repository;
         this.analyticsRepository = analyticsRepository;
+        this.processedEventRepository=processedEventRepository;
     }
     
     @Transactional
@@ -34,13 +40,43 @@ public class KafkaConsumerService {
             topics = "redirect-events",
             groupId = "analytics-group")
     public void consume(RedirectEvent event) {
+//    	throw new RuntimeException("Testing DLQ"); 
     	
-        log.info(
-                "Received redirect event {}",
-                event.getShortCode());
+    	
+    	log.info(
+    		    "Received event {} for shortCode={}",
+    		    event.getEventId(),
+    		    event.getShortCode());
+        
+        try{
+        	
+
+            processedEventRepository.save(
+
+                new ProcessedEvent(
+
+                    event.getEventId()
+
+                )
+
+            );
+
+        }
+        catch(DataIntegrityViolationException e){
+
+        	log.info(
+        		    "Duplicate event ignored: {}",
+        		    event.getEventId()
+        		);
+
+            return;
+
+        }
+
         
         AnalyticsEvent analyticsEvent =
                 new AnalyticsEvent();
+        
 
         analyticsEvent.setShortCode(
                 event.getShortCode());
@@ -54,7 +90,7 @@ public class KafkaConsumerService {
         analyticsEvent.setUserAgent(
                 event.getUserAgent());
         
-        analyticsRepository.save(
+        analyticsRepository.saveAndFlush(
                 analyticsEvent);
 
         repository.incrementClickCount(

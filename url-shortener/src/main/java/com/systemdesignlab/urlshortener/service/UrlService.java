@@ -12,6 +12,7 @@ import com.systemdesignlab.urlshortener.util.SnowflakeGenerator;
 import jakarta.transaction.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,6 +78,7 @@ public class UrlService {
 
             kafkaProducerService.publish(
             		new RedirectEvent(
+            				UUID.randomUUID(),
             		        shortCode,
             		        LocalDateTime.now(),
             		        ipAddress,
@@ -93,6 +95,7 @@ public class UrlService {
 
         kafkaProducerService.publish(
         		new RedirectEvent(
+        				UUID.randomUUID(),
         		        shortCode,
         		        LocalDateTime.now(),
         		        ipAddress,
