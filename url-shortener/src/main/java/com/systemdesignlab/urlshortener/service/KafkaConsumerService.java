@@ -7,6 +7,8 @@ import com.systemdesignlab.urlshortener.repository.AnalyticsRepository;
 import com.systemdesignlab.urlshortener.repository.ProcessedEventRepository;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.transaction.Transactional;
 
 import org.slf4j.Logger;
@@ -18,86 +20,68 @@ import org.springframework.stereotype.Service;
 @Service
 public class KafkaConsumerService {
 
-    private static final Logger log =
-            LoggerFactory.getLogger(KafkaConsumerService.class);
+	private static final Logger log = LoggerFactory.getLogger(KafkaConsumerService.class);
 
-    private final UrlRepository repository;
-    private final AnalyticsRepository analyticsRepository; 
-    private final ProcessedEventRepository processedEventRepository;
+	private final UrlRepository repository;
+	private final AnalyticsRepository analyticsRepository;
+	private final ProcessedEventRepository processedEventRepository;
+	private final Counter processedCounter;
+	private final Counter duplicateCounter;
 
-    public KafkaConsumerService(
-            UrlRepository repository,
-            AnalyticsRepository analyticsRepository,
-            ProcessedEventRepository processedEventRepository) {
+	public KafkaConsumerService(UrlRepository repository, AnalyticsRepository analyticsRepository,
+			ProcessedEventRepository processedEventRepository, MeterRegistry meterRegistry) {
 
-        this.repository = repository;
-        this.analyticsRepository = analyticsRepository;
-        this.processedEventRepository=processedEventRepository;
-    }
-    
-    @Transactional
-    @KafkaListener(
-            topics = "redirect-events",
-            groupId = "analytics-group")
-    public void consume(RedirectEvent event) {
+		this.repository = repository;
+		this.analyticsRepository = analyticsRepository;
+		this.processedEventRepository = processedEventRepository;
+		this.processedCounter = meterRegistry.counter("kafka.events.processed");
+
+		this.duplicateCounter = meterRegistry.counter("kafka.events.duplicate");
+	}
+
+	@Transactional
+	@KafkaListener(topics = "redirect-events", groupId = "analytics-group")
+	public void consume(RedirectEvent event) {
 //    	throw new RuntimeException("Testing DLQ"); 
-    	
-    	
-    	log.info(
-    		    "Received event {} for shortCode={}",
-    		    event.getEventId(),
-    		    event.getShortCode());
-        
-        try{
-        	
 
-            processedEventRepository.save(
+		log.info("Received event {} for shortCode={}", event.getEventId(), event.getShortCode());
 
-                new ProcessedEvent(
+		try {
 
-                    event.getEventId()
+			processedEventRepository.save(
 
-                )
+					new ProcessedEvent(
 
-            );
+							event.getEventId()
 
-        }
-        catch(DataIntegrityViolationException e){
+					)
 
-        	log.info(
-        		    "Duplicate event ignored: {}",
-        		    event.getEventId()
-        		);
+			);
 
-            return;
+		} catch (DataIntegrityViolationException e) {
+			duplicateCounter.increment();
 
-        }
+			log.info("Duplicate event ignored: {}", event.getEventId());
 
-        
-        AnalyticsEvent analyticsEvent =
-                new AnalyticsEvent();
-        
+			return;
 
-        analyticsEvent.setShortCode(
-                event.getShortCode());
+		}
 
-        analyticsEvent.setClickedAt(
-                event.getTimestamp());
+		AnalyticsEvent analyticsEvent = new AnalyticsEvent();
 
-        analyticsEvent.setIpAddress(
-                event.getIpAddress());
+		analyticsEvent.setShortCode(event.getShortCode());
 
-        analyticsEvent.setUserAgent(
-                event.getUserAgent());
-        
-        analyticsRepository.saveAndFlush(
-                analyticsEvent);
+		analyticsEvent.setClickedAt(event.getTimestamp());
 
-        repository.incrementClickCount(
-                event.getShortCode());
+		analyticsEvent.setIpAddress(event.getIpAddress());
 
-        log.info(
-                "Click count updated for {}",
-                event.getShortCode());
-    }
+		analyticsEvent.setUserAgent(event.getUserAgent());
+
+		analyticsRepository.saveAndFlush(analyticsEvent);
+
+		repository.incrementClickCount(event.getShortCode());
+		processedCounter.increment();
+
+		log.info("Click count updated for {}", event.getShortCode());
+	}
 }

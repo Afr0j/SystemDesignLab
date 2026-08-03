@@ -11,6 +11,8 @@ import com.systemdesignlab.urlshortener.util.Base62Encoder;
 import com.systemdesignlab.urlshortener.util.BloomFilter;
 import com.systemdesignlab.urlshortener.util.SnowflakeGenerator;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.transaction.Transactional;
 
 import java.time.LocalDateTime;
@@ -26,126 +28,104 @@ public class UrlService {
 	private final CacheService cacheService;
 	private final KafkaProducerService kafkaProducerService;
 	private final BloomFilter bloomFilter;
-	
-	private static final Logger log =LoggerFactory.getLogger(UrlService.class);
+	private final Counter urlsCreatedCounter;
+	private final Counter redirectCounter;
+	private final Counter bloomRejectedCounter;
 
-	public UrlService(
-	        UrlRepository repository,
-	        SnowflakeGenerator snowflakeGenerator,
-	        CacheService cacheService,
-	        KafkaProducerService kafkaProducerService,
-	        BloomFilter bloomFilter) {
+	private static final Logger log = LoggerFactory.getLogger(UrlService.class);
 
-	    this.repository = repository;
-	    this.snowflakeGenerator = snowflakeGenerator;
-	    this.cacheService = cacheService;
-	    this.kafkaProducerService = kafkaProducerService;
-	    this.bloomFilter=bloomFilter;
+	public UrlService(UrlRepository repository, SnowflakeGenerator snowflakeGenerator, CacheService cacheService,
+			KafkaProducerService kafkaProducerService, BloomFilter bloomFilter, MeterRegistry meterRegistry) {
+
+		this.repository = repository;
+		this.snowflakeGenerator = snowflakeGenerator;
+		this.cacheService = cacheService;
+		this.kafkaProducerService = kafkaProducerService;
+		this.bloomFilter = bloomFilter;
+		this.urlsCreatedCounter = meterRegistry.counter("url.generated");
+		this.redirectCounter = meterRegistry.counter("url.redirect");
+		this.bloomRejectedCounter = meterRegistry.counter("bloom.rejected");
 	}
-    
-    @Transactional
-    public String shorten(String longUrl) {
 
-    	
-    	log.info("Creating short URL for {}", longUrl);
+	@Transactional
+	public String shorten(String longUrl) {
 
-    	long id = snowflakeGenerator.nextId();
+		log.info("Creating short URL for {}", longUrl);
 
-    	String shortCode =
-    	        Base62Encoder.encode(id);
-    	log.info("Generated shortCode={}, length={}", shortCode, shortCode.length());
+		long id = snowflakeGenerator.nextId();
 
-    	UrlMapping entity = new UrlMapping();
+		String shortCode = Base62Encoder.encode(id);
+		log.info("Generated shortCode={}, length={}", shortCode, shortCode.length());
 
-    	entity.setId(id);
+		UrlMapping entity = new UrlMapping();
 
-    	entity.setLongUrl(longUrl);
+		entity.setId(id);
 
-    	entity.setShortCode(shortCode);
+		entity.setLongUrl(longUrl);
 
-    	repository.save(entity);
-    	bloomFilter.add(shortCode);
+		entity.setShortCode(shortCode);
 
-    	log.info("Created short code {} for {}", shortCode, longUrl);
+		repository.save(entity);
+		urlsCreatedCounter.increment();
+		bloomFilter.add(shortCode);
 
-    	return shortCode;
-    }
-    
-    @Transactional
-    public String redirect(String shortCode, String ipAddress, String userAgent) {
-    	if (!bloomFilter.mightContain(shortCode)) {
+		log.info("Created short code {} for {}", shortCode, longUrl);
 
-            log.info(
-                "Bloom Filter rejected {}",
-                shortCode);
+		return shortCode;
+	}
 
-            throw new UrlNotFoundException(shortCode);
-        }
+	@Transactional
+	public String redirect(String shortCode, String ipAddress, String userAgent) {
+		if (!bloomFilter.mightContain(shortCode)) {
+			bloomRejectedCounter.increment();
 
-        log.info("Redirect requested for {}", shortCode);
-        
-        
+			log.info("Bloom Filter rejected {}", shortCode);
 
-        String cachedUrl = null;
+			throw new UrlNotFoundException(shortCode);
+		}
 
-        try {
+		log.info("Redirect requested for {}", shortCode);
 
-            cachedUrl =
-                    cacheService.getLongUrl(shortCode);
+		String cachedUrl = null;
 
-        }
-        catch (RedisUnavailableException ex) {
+		try {
 
-            log.warn(
-                "Redis unavailable. Falling back to MySQL.");
-        }
-        
+			cachedUrl = cacheService.getLongUrl(shortCode);
 
-        if (cachedUrl != null) {
+		} catch (RedisUnavailableException ex) {
 
-            log.info("Cache HIT for {}", shortCode);
+			log.warn("Redis unavailable. Falling back to MySQL.");
+		}
 
-            kafkaProducerService.publish(
-            		new RedirectEvent(
-            				UUID.randomUUID(),
-            		        shortCode,
-            		        LocalDateTime.now(),
-            		        ipAddress,
-            		        userAgent
-            		));
+		if (cachedUrl != null) {
 
-            return cachedUrl;
-        }
+			log.info("Cache HIT for {}", shortCode);
+			redirectCounter.increment();
 
-        log.info("Cache MISS for {}", shortCode);
+			kafkaProducerService.publish(
+					new RedirectEvent(UUID.randomUUID(), shortCode, LocalDateTime.now(), ipAddress, userAgent));
 
-        UrlMapping url = repository.findByShortCode(shortCode)
-                .orElseThrow(() -> new UrlNotFoundException(shortCode));
+			return cachedUrl;
+		}
 
-        kafkaProducerService.publish(
-        		new RedirectEvent(
-        				UUID.randomUUID(),
-        		        shortCode,
-        		        LocalDateTime.now(),
-        		        ipAddress,
-        		        userAgent
-        		));
+		log.info("Cache MISS for {}", shortCode);
 
-        try {
+		UrlMapping url = repository.findByShortCode(shortCode).orElseThrow(() -> new UrlNotFoundException(shortCode));
+		redirectCounter.increment();
+		kafkaProducerService
+				.publish(new RedirectEvent(UUID.randomUUID(), shortCode, LocalDateTime.now(), ipAddress, userAgent));
 
-            cacheService.cacheLongUrl(
-                    shortCode,
-                    url.getLongUrl());
+		try {
 
-        }
-        catch (RedisUnavailableException ex) {
+			cacheService.cacheLongUrl(shortCode, url.getLongUrl());
 
-            log.warn(
-                    "Redis unavailable. Skipping cache update.");
-        }
+		} catch (RedisUnavailableException ex) {
 
-        log.info("Cached {} -> {}", shortCode, url.getLongUrl());
+			log.warn("Redis unavailable. Skipping cache update.");
+		}
 
-        return url.getLongUrl();
-    }
+		log.info("Cached {} -> {}", shortCode, url.getLongUrl());
+
+		return url.getLongUrl();
+	}
 }

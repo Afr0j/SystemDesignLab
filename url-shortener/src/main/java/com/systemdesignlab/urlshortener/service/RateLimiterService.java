@@ -8,43 +8,61 @@ import org.springframework.stereotype.Service;
 import com.systemdesignlab.urlshortener.exception.RedisUnavailableException;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Service
 public class RateLimiterService {
 
-    private static final int MAX_REQUESTS = 5;
-    private static final Duration WINDOW = Duration.ofMinutes(1);
+	private static final int MAX_REQUESTS = 5;
+	private static final Duration WINDOW = Duration.ofMinutes(1);
 
-    private final RedisTemplate<String, String> redisTemplate;
+	private final RedisTemplate<String, String> redisTemplate;
 
-    public RateLimiterService(
-            RedisTemplate<String, String> redisTemplate) {
+	private final Counter allowedCounter;
+	private final Counter blockedCounter;
+	private final Counter redisFailureCounter;
 
-        this.redisTemplate = redisTemplate;
-    }
+	public RateLimiterService(RedisTemplate<String, String> redisTemplate, MeterRegistry meterRegistry) {
 
-    @CircuitBreaker(
-            name = "redisRateLimiter",
-            fallbackMethod = "redisUnavailable")
-    public boolean allowRequest(String ipAddress) {
+		this.redisTemplate = redisTemplate;
+		this.allowedCounter = meterRegistry.counter("rate_limit.allowed");
 
-        String key = "rate_limit:" + ipAddress;
+		this.blockedCounter = meterRegistry.counter("rate_limit.blocked");
 
-        Long count = redisTemplate
-                .opsForValue()
-                .increment(key);
+		this.redisFailureCounter = meterRegistry.counter("rate_limit.redis.failure");
+	}
 
-        if (count == 1) {
-            redisTemplate.expire(key, WINDOW);
-        }
+	@CircuitBreaker(name = "redisRateLimiter", fallbackMethod = "redisUnavailable")
+	public boolean allowRequest(String ipAddress) {
 
-        return count <= MAX_REQUESTS;
-    }
+		String key = "rate_limit:" + ipAddress;
 
-    public boolean redisUnavailable(
-            String ipAddress,
-            Throwable ex) {
+		Long count = redisTemplate.opsForValue().increment(key);
 
-        throw new RedisUnavailableException(ex);
-    }
+		if (count == 1) {
+			redisTemplate.expire(key, WINDOW);
+		}
+
+		boolean allowed = count <= MAX_REQUESTS;
+
+		if (allowed) {
+
+			allowedCounter.increment();
+
+		} else {
+
+			blockedCounter.increment();
+
+		}
+
+		return allowed;
+	}
+
+	public boolean redisUnavailable(String ipAddress, Throwable ex) {
+		redisFailureCounter.increment();
+
+
+		throw new RedisUnavailableException(ex);
+	}
 }
