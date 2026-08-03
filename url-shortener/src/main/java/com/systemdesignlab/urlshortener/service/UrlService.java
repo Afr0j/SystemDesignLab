@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 
 import com.systemdesignlab.urlshortener.dto.RedirectEvent;
 import com.systemdesignlab.urlshortener.entity.UrlMapping;
+import com.systemdesignlab.urlshortener.exception.RedisUnavailableException;
 import com.systemdesignlab.urlshortener.exception.UrlNotFoundException;
 import com.systemdesignlab.urlshortener.repository.UrlRepository;
 import com.systemdesignlab.urlshortener.util.Base62Encoder;
@@ -82,8 +83,23 @@ public class UrlService {
         }
 
         log.info("Redirect requested for {}", shortCode);
+        
+        
 
-        String cachedUrl = cacheService.getLongUrl(shortCode);
+        String cachedUrl = null;
+
+        try {
+
+            cachedUrl =
+                    cacheService.getLongUrl(shortCode);
+
+        }
+        catch (RedisUnavailableException ex) {
+
+            log.warn(
+                "Redis unavailable. Falling back to MySQL.");
+        }
+        
 
         if (cachedUrl != null) {
 
@@ -115,8 +131,18 @@ public class UrlService {
         		        userAgent
         		));
 
-        cacheService.cacheLongUrl(shortCode,
-                                  url.getLongUrl());
+        try {
+
+            cacheService.cacheLongUrl(
+                    shortCode,
+                    url.getLongUrl());
+
+        }
+        catch (RedisUnavailableException ex) {
+
+            log.warn(
+                    "Redis unavailable. Skipping cache update.");
+        }
 
         log.info("Cached {} -> {}", shortCode, url.getLongUrl());
 
