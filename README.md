@@ -59,3 +59,6 @@ flowchart TD
 | **Monitoring** | Micrometer, Prometheus, Grafana |
 | **Infrastructure** | Docker, Docker Compose |
 | **Utilities** | Snowflake ID Generator, Base62 Encoding, Bloom Filter |
+
+
+<img width="1761" height="810" alt="image" src="https://github.com/user-attachments/assets/85a7a1a3-45c5-4017-bfb0-6c7e00aefbe6" />
