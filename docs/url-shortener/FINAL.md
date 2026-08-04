@@ -1,392 +1,155 @@
-What We Learned
-1. Core Backend
-Spring Boot
-REST APIs
-Layered Architecture
-DTOs
-Exception Handling
-Validation
-Global Exception Handler
-2. Database
+# Production-Grade URL Shortener — Architecture
+
+## Complete Request Flow
+
+```mermaid
+flowchart TD
+    Client([Client: Browser / Postman / App]) -->|HTTP Request| API[Spring Boot REST API]
+
+    API --> Shorten[POST /shorten]
+    API --> Redirect["GET /{shortCode}"]
+
+    %% ---- Shorten flow ----
+    Shorten --> Snowflake[Snowflake ID Generator]
+    Snowflake --> Base62[Base62 Encoder]
+    Base62 --> ShortCode[Short Code Created]
+    ShortCode --> SaveMySQL[(Save into MySQL)]
+    SaveMySQL --> AddBloom[Add to Bloom Filter]
+
+    %% ---- Redirect flow ----
+    Redirect --> RateLimiter[Redis Rate Limiter<br/>key = rate_limit:IP]
+    RateLimiter -->|Too many requests| Return429[429 Too Many Requests]
+    RateLimiter -->|OK| BloomCheck[Bloom Filter Check]
+    BloomCheck -->|Definitely not present| Return404[404 Not Found]
+    BloomCheck -->|Possibly present| Cache[(Redis Cache<br/>Cache-Aside Pattern)]
+
+    Cache -->|Hit| ReturnLong[Return Long URL]
+    Cache -->|Miss| QueryMySQL[(Query MySQL)]
+    QueryMySQL --> StoreRedis[Store Result in Redis]
+    StoreRedis --> ReturnLong
+
+    ReturnLong --> Publish[Publish Redirect Event]
+    Publish --> Topic[[Apache Kafka Topic]]
+
+    Topic --> Consumer[Kafka Consumer: Analytics]
+    Topic --> DLQ[Dead Letter Queue<br/>failed messages — future]
+
+    Consumer --> Idempotency{Idempotency Check<br/>processed_events table}
+    Idempotency -->|Duplicate| Ignore[Ignore Event]
+    Idempotency -->|New| StoreAnalytics[(Store Analytics Event<br/>analytics_event)]
+    Idempotency -->|New| IncrementClick[(Increment Click Count<br/>url_mapping)]
+```
+
+## Monitoring & Observability
+
+```mermaid
+flowchart TD
+    App[Spring Boot Application] --> Micrometer[Micrometer Metrics]
+    Micrometer --> Actuator["/actuator/prometheus"]
+    Actuator --> Prometheus[Prometheus Server]
+    Prometheus --> TSDB[(Time-Series Database)]
+    TSDB --> Grafana[Grafana Dashboard]
+
+    Grafana --> URLGen[URL Generated]
+    Grafana --> CacheMetrics[Cache Hit / Miss]
+    Grafana --> KafkaMetrics[Kafka Metrics]
+    Grafana --> RateLimiterMetrics[Rate Limiter Metrics]
+    Grafana --> CircuitBreakerMetrics[Circuit Breaker Metrics]
+```
+
+## Infrastructure (Docker)
+
+```mermaid
+flowchart TD
+    Compose[Docker Compose] --> SpringBoot[Spring Boot Application]
+    Compose --> MySQL[(MySQL Database)]
+    Compose --> Redis[(Redis Cache)]
+    Compose --> Kafka[Kafka Broker]
+    Compose --> KafkaUI[Kafka UI]
+    Compose --> Prometheus[Prometheus]
+    Compose --> Grafana[Grafana]
+```
+
+## Failure Handling
+
+**Redis down:**
+`Redis Down` → `Circuit Breaker Opens` → `Skip Cache` → `Use MySQL Directly`
+
+**Rate limiter's Redis down:**
+`Rate Limiter Redis Down` → `Fallback` → `Allow Request`
+
+**Kafka down:**
+`Kafka Down` → `Redirect Still Works` → `Analytics Temporarily Lost`
+
+> In a future version, the Outbox Pattern and a Dead Letter Queue would ensure those analytics aren't lost.
+
+## Components Used
+
+- **Client**
+  - Spring Boot
+    - REST Controller
+    - Service Layer
+    - Repository Layer
+    - Global Exception Handler
+    - Validation
+    - Snowflake Generator
+    - Base62 Encoder
+    - Bloom Filter
+    - Redis Cache
+    - Redis Rate Limiter
+    - Circuit Breaker (Resilience4j)
+    - Kafka Producer
+    - Kafka Consumer
+    - Idempotent Consumer
+    - Micrometer Metrics
+  - MySQL
+  - Redis
+  - Kafka
+  - Prometheus
+  - Grafana
+  - Docker
 
-We learned
+## What an Interviewer Can Infer From This Project
 
-MySQL
-Spring Data JPA
-Hibernate
-Entity Mapping
-Repository Pattern
-Transactions
-Database Design
+This single project demonstrates experience with:
 
-Tables
+### Backend
 
-url_mapping
-analytics_event
-processed_events
-3. URL Generation
+- Java
+- Spring Boot
+- REST APIs
+- JPA / Hibernate
+- Layered Architecture
 
-Instead of random strings,
+### Databases
 
-we implemented
+- MySQL
+- Redis
 
-Snowflake ID
-        ↓
-Base62 Encoding
-        ↓
-Short URL
+### Distributed Systems
 
-Learned
+- Event-Driven Architecture
+- Kafka
+- Idempotent Consumer
+- Cache-Aside Pattern
+- Bloom Filter
+- Snowflake IDs
+- Base62 Encoding
 
-Distributed ID Generation
-Why UUID isn't always the best choice
-Why Snowflake is used at Twitter and many large companies
-Base62 Encoding
-4. Caching
+### Resilience
 
-Implemented
+- Circuit Breaker
+- Graceful Fallback
+- Rate Limiting
 
-Redis
+### Observability
 
-Concepts
+- Micrometer
+- Prometheus
+- Grafana
+- Custom Metrics
 
-Cache Aside Pattern
-Cache Hit
-Cache Miss
-TTL
-Cache Eviction
+### Infrastructure
 
-Flow
-
-Request
-
-↓
-
-Redis
-
-↓
-
-Hit → Return
-
-↓
-
-Miss
-
-↓
-
-MySQL
-
-↓
-
-Update Cache
-5. Bloom Filter
-
-Implemented
-
-Bloom Filter
-
-Purpose
-
-Avoid unnecessary database queries for invalid short URLs.
-
-Flow
-
-Unknown URL
-
-↓
-
-Bloom Filter
-
-↓
-
-Definitely Not Present
-
-↓
-
-Return 404
-
-(No DB Query)
-
-Learned
-
-Bit Arrays
-Hash Functions
-False Positives
-No False Negatives
-6. Kafka
-
-Implemented
-
-Producer
-
-↓
-
-Topic
-
-↓
-
-Consumer
-
-Producer publishes
-
-RedirectEvent
-
-Consumer
-
-Saves analytics
-Updates click count
-
-Why?
-
-To make redirect fast while analytics runs asynchronously.
-
-7. Idempotency
-
-Implemented
-
-processed_events
-
-Purpose
-
-Prevent duplicate Kafka events.
-
-Flow
-
-Receive Event
-
-↓
-
-Already Processed?
-
-↓
-
-Yes
-
-↓
-
-Ignore
-8. Rate Limiter
-
-Implemented
-
-Redis-based rate limiting.
-
-Key
-
-rate_limit:<IP>
-
-Learned
-
-Fixed Window
-TTL
-Per-IP limiting
-
-Why per IP?
-
-Protects the whole service instead of individual URLs.
-
-9. Circuit Breaker
-
-Implemented
-
-Resilience4j
-
-Scenarios
-
-Redis Down
-
-↓
-
-Skip Cache
-
-↓
-
-Use MySQL
-
-Rate Limiter Redis Down
-
-↓
-
-Allow Request
-
-↓
-
-Keep Service Alive
-
-Learned
-
-Closed
-Open
-Half Open
-Fallback Methods
-10. Failure Handling
-
-We intentionally tested
-
-✅ Redis Down
-
-✅ Kafka Down
-
-✅ Cache Failure
-
-✅ Rate Limiter Failure
-
-Instead of crashing,
-
-the system degraded gracefully.
-
-11. Metrics
-
-Implemented
-
-Micrometer Counters
-
-Examples
-
-url.generated
-
-url.redirect
-
-cache.hit
-
-cache.miss
-
-cache.redis.failure
-
-rate_limit.allowed
-
-rate_limit.blocked
-
-kafka.events.published
-
-kafka.events.processed
-
-bloom.rejected
-12. Prometheus
-
-Collected metrics from
-
-/actuator/prometheus
-
-Learned
-
-Metric scraping
-Counter naming
-Prometheus format
-13. Grafana
-
-Built dashboard showing
-
-URL Generated
-Redirects
-Cache Hits
-Cache Misses
-Redis Failures
-Kafka Published
-Kafka Processed
-Bloom Rejected
-Rate Limited
-14. Docker
-
-Containerized
-
-MySQL
-Redis
-Kafka
-Kafka UI
-Prometheus
-Grafana
-
-Everything runs using
-
-docker compose up -d
-🧠 Important System Design Concepts Learned
-Layered Architecture
-Cache Aside Pattern
-Event Driven Architecture
-Asynchronous Processing
-Circuit Breaker
-Rate Limiting
-Bloom Filter
-Idempotency
-Observability
-Metrics
-Monitoring
-Docker Networking
-Graceful Degradation
-Fail Fast Principle
-🔄 Final Architecture
-                Client
-                   │
-                   ▼
-             Spring Boot API
-                   │
-      ┌────────────┼────────────┐
-      ▼            ▼            ▼
-Rate Limiter   Bloom Filter   Metrics
-      │
-      ▼
- Redis Cache
-   │      │
-Hit      Miss
- │         │
- ▼         ▼
-Return    MySQL
-             │
-             ▼
-      Kafka Producer
-             │
-             ▼
-      Kafka Topic
-             │
-             ▼
-      Kafka Consumer
-      │             │
-      ▼             ▼
-Analytics      Click Count
-             │
-             ▼
- Prometheus
-      │
-      ▼
- Grafana
-📈 What Makes This Project Different
-
-This isn't just another CRUD application.
-
-It demonstrates:
-
-High Performance
-Scalability Concepts
-Fault Tolerance
-Distributed Systems Basics
-Observability
-Event-Driven Processing
-Production-like Infrastructure
-🚀 Technologies Used
-Backend
-Java 21
-Spring Boot
-Spring MVC
-Spring Data JPA
-Hibernate
-Maven
-Database
-MySQL
-Cache
-Redis
-Messaging
-Apache Kafka
-Resilience
-Resilience4j
-Monitoring
-Micrometer
-Prometheus
-Grafana
-Infrastructure
-Docker
-Docker Compose
-Utilities
-Snowflake ID Generator
-Base62 Encoding
-Bloom Filter
+- Docker
+- Docker Compose
